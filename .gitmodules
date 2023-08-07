@@ -4,3 +4,9 @@
 [submodule "third_parties/transformers"]
 	path = third_parties/transformers
 	url = git@github.com:huggingface/transformers.git
+[submodule "third_parties/donut"]
+	path = third_parties/donut
+	url = git@github.com:clovaai/donut.git
+[submodule "third_parties/LaVIN"]
+	path = third_parties/LaVIN
+	url = git@github.com:luogen1996/LaVIN.git
