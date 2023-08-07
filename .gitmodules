@@ -1,3 +1,6 @@
 [submodule "third_parties/unilm"]
 	path = third_parties/unilm
 	url = git@github.com:microsoft/unilm.git
+[submodule "third_parties/transformers"]
+	path = third_parties/transformers
+	url = git@github.com:huggingface/transformers.git
