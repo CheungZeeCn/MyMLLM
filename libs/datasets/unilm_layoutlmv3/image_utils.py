@@ -3,13 +3,11 @@ import warnings
 import math
 import random
 import numpy as np
-from PIL import Image, ImageDraw, ImageDraw2
+from PIL import Image
 import torch
-
 
 from detectron2.data.detection_utils import read_image
 from detectron2.data.transforms import ResizeTransform, TransformList
-
 
 def normalize_bbox(bbox, size):
     return [
@@ -27,15 +25,6 @@ def load_image(image_path):
     img_trans = TransformList([ResizeTransform(h=h, w=w, new_h=224, new_w=224)])
     image = torch.tensor(img_trans.apply_image(image).copy()).permute(2, 0, 1)  # copy to make it writeable
     return image, (w, h)
-
-"""
-    @20230815
-"""
-def get_image_wh(image_path):
-    image = read_image(image_path, format="BGR")
-    h = image.shape[0]
-    w = image.shape[1]
-    return w, h
 
 
 def crop(image, i, j, h, w, boxes=None):
@@ -293,10 +282,3 @@ def pil_loader(path: str) -> Image.Image:
     with open(path, 'rb') as f:
         img = Image.open(f)
         return img.convert('RGB')
-
-
-def get_image_size(file_path):
-    img = Image.open(file_path)
-    width, height = img.size
-    return (width, height)
-
