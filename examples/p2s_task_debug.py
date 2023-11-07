@@ -1,6 +1,4 @@
 import os
-from transformers import Pix2StructProcessor, Pix2StructImageProcessor
-import PIL
 from PIL import Image
 import matplotlib.pyplot as plt
 import pickle
@@ -9,9 +7,6 @@ import re
 from libs.datasets import image_utils
 from libs.draw_utils import pil_draw_line, pil_draw_box
 from libs.datasets import dataset_utils
-from transformers import image_utils as hf_image_utils
-from transformers import image_transforms
-import torch
 import math
 import logging
 
@@ -101,7 +96,7 @@ def trans_locs_to_coords(locs, img, max_loc):
     return coords
 
 
-def show_one_task(img, task, color='green', max_loc=500):
+def show_one_task(img, task, color=('green', 'blue'), max_loc=500):
     """
         prompt:  根据上下文预测文字和位置: 链接 == * <layout_0>嘉</layout_0>诺撒 圣心<text_0><loc_114><loc_92><loc_153><loc_107></text_0> 中学<text_layout_0>a<layout_1>t</layout_1>e<text_1><loc_151><loc_109><loc_161><loc_122></text_1> 202<text_layout_1>1 <layout_2>51</layout_2>60<text_2><loc_104><loc_141><loc_136><loc_158></text_2>桥 贤儿 小 <text_layout_2>贤儿 <layout_3>（小桥</layout_3> 贤児， <text_3><loc_204><loc_107><loc_223><loc_120></text_3>，<text_layout_3> 本男<layout_4>性</layout_4>前 <text_4><loc_198><loc_140><loc_216><loc_156></text_4>员<text_layout_4> <layout_5>D</layout_5>J、 电<text_5><loc_328><loc_56><loc_385><loc_70></text_5>、音 <text_layout_5>活<layout_6>动</layout_6>制<text_6><loc_385><loc_70><loc_403><loc_86></text_6>人 。<text_layout_6>身 于<layout_7>东京都</layout_7> 。<text_7><loc_332><loc_120><loc_355><loc_135></text_7>高170cm 。A型血。 == 简介 == 日 <text_layout_7>前<layout_8>演员，</layout_8> 引退后 <text_8><loc_383><loc_219><loc_426><loc_237></text_8>时尚
         labels:  <layout_0><loc_78><loc_76><loc_98><loc_91><text_0>英文<text_layout_0>d<loc_111><loc_109><loc_122><loc_122><layout_1><loc_131><loc_109><loc_141><loc_122><text_1>=<text_layout_1>01019<loc_97><loc_124><loc_151><loc_140><layout_2><loc_61><loc_141><loc_82><loc_158><text_2>4小<text_layout_2>桥<loc_207><loc_59><loc_226><loc_74><layout_3><loc_212><loc_74><loc_266><loc_88><text_3>）<text_layout_3>日<loc_242><loc_107><loc_262><loc_120><layout_4><loc_241><loc_123><loc_260><loc_136><text_4>演<text_layout_4>、<loc_233><loc_140><loc_250><loc_156><layout_5><loc_196><loc_159><loc_205><loc_175><text_5>影导演<text_layout_5>乐<loc_311><loc_70><loc_329><loc_86><layout_6><loc_347><loc_70><loc_366><loc_86><text_6>作<text_layout_6>出<loc_330><loc_88><loc_350><loc_102><layout_7><loc_330><loc_103><loc_390><loc_118><text_7>身<text_layout_7>本<loc_39><loc_225><loc_57><loc_241><layout_8><loc_74><loc_225><loc_128><loc_241><text_8>经历
@@ -119,14 +114,18 @@ def show_one_task(img, task, color='green', max_loc=500):
     # prompt:  <text_\d+>  or text_layout_\d+ 任务
     # labels:  <layout_\d+>  or text_layout_\d+ 任务
     # 做个简单版本
-    locs = re_pick_locs(prompt_str) + re_pick_locs(label_str)
-    coords = trans_locs_to_coords(locs, img, max_loc)
+    locs0 = re_pick_locs(prompt_str)
+    locs1 = re_pick_locs(label_str)
+    coords = trans_locs_to_coords(locs0, img, max_loc)
     for coord in coords:
-        pil_draw_box(img, coord, color=color)
+        pil_draw_box(img, coord, color=color[0])
+    coords = trans_locs_to_coords(locs1, img, max_loc)
+    for coord in coords:
+        pil_draw_box(img, coord, color=color[1])
     return img
 
 
-def show_one_pred(img, pred_str, color='blue', max_loc=500):
+def show_one_pred(img, pred_str, color='orange', max_loc=500):
     locs = re_pick_locs(pred_str)
     coords = trans_locs_to_coords(locs, img, max_loc)
     for coord in coords:

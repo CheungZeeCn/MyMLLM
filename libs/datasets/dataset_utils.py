@@ -1,3 +1,4 @@
+# dataset_utils.py
 """
 一些相对常用的数据集函数
         by zhangz@20230330
@@ -13,6 +14,9 @@ from PIL import Image
 import jsonlines
 import re
 import random
+import logging
+import torch
+from typing import Any
 
 
 def box_norm(box, width, height, norm_to=1000):
@@ -252,6 +256,10 @@ def load_json_lines_into_list(file, encoding='utf-8'):
             ret.append(item)
     return ret
 
+def load_json(file, encoding='utf-8'):
+    with open(file, 'r', encoding=encoding) as f:
+        ret = json.load(f)
+    return ret
 
 # 20230914
 def gen_mask_in_bboxes_by_ratio(bboxes, text, ratio=0.30):
@@ -308,7 +316,7 @@ def collect_mask_spans(mask_flags):
 def custom_token_split(input, pattern=r"</?.+?>"):
     last_index = 0
     tokenized = []
-    for m in re.finditer(r"</?.+?>", input):
+    for m in re.finditer(pattern, input):
         m_i, m_j = m.span()
         if m_i != last_index:
             tokenized += list(input[last_index:m_i])
@@ -319,3 +327,201 @@ def custom_token_split(input, pattern=r"</?.+?>"):
     elif m_j != len(input):
         tokenized += list(input[m_j:])
     return tokenized
+
+
+def load_pa_ocr_data_in_dict(dir_path):
+    ret_data = defaultdict(dict)
+    for file in os.listdir(dir_path):
+        if file.endswith(".txt"):
+            file_id = file.replace(".txt", "")
+            fn = os.path.join(dir_path, file)
+            ret_data[file_id] = load_pa_ocr_in_dict(fn)
+    return ret_data
+
+
+def load_pa_ocr_in_dict(fn, text_only=False, with_len4_coord=False):
+    bboxes = {}
+    with open(fn) as f:
+        for line in f:
+            line = line.strip()
+            if line == "":
+                continue
+            sp_line = line.split("\t")
+            if len(sp_line) < 10:
+                continue
+            bbox = {}
+            for i in range(8):
+                sp_line[i] = int(float(sp_line[i]))
+            coords = fix_coord_error(sp_line[:8])
+            if with_len4_coord is True:
+                coords = pick_2_points(coords)
+            bbox['coord'] = coords
+            bbox['score'] = round(float(sp_line[8].strip()), 5)
+            bbox['text'] = sp_line[9].strip()
+            bbox['length'] = len(bbox['text'])
+            if len(bbox['text']) == 0:
+                logging.warning("0 == bbox['length'], ignore: '{}'".format(line))
+                continue
+            if text_only is True:
+                bboxes[bbox['coord']] = bbox['text']
+            else:
+                bboxes[bbox['coord']] = bbox
+    return bboxes
+
+
+def load_pa_ocr_with_char_x_axis(fn):
+    bboxes = []
+    with open(fn) as f:
+        for line in f:
+            line = line.strip()
+            if line == "":
+                continue
+            sp_line = line.split("\t")
+            if len(sp_line) <= 10:
+                continue
+            bbox = {}
+            coords = fix_coord_error(sp_line[:8])
+            bbox['coord'] = coords
+            bbox['score'] = round(float(sp_line[8].strip()), 5)
+            bbox['text'] = sp_line[9].strip()
+            bbox['length'] = len(bbox['text'])
+            bbox['char_x_axis'] = [round(float(x_coord), 5) for x_coord in sp_line[10:]]
+            if len(bbox['char_x_axis']) != bbox['length']:
+                logging.warning("len(bbox['char_x_axis']) != bbox['length'], ignore: '{}'".format(line))
+                continue
+            bboxes.append(bbox)
+    return bboxes
+
+
+def load_pa_ocr_data(dir_path):
+    """
+        加载成字典的格式返回
+    :param dir_path:
+    :return:
+    """
+    ret_data = defaultdict(dict)
+    for file in os.listdir(dir_path):
+        if file.endswith(".txt"):
+            file_id = file.replace(".txt", "")
+            with open(os.path.join(dir_path, file)) as f:
+                data = f.read().split("\n")
+                for line in data[1:]:
+                    line = line.strip()
+                    if line == "":
+                        continue
+                    ls = line.split("\t")
+                    if len(ls) <= 10:
+                        continue
+                    coords = ls[0:2] + ls[7:8] + ls[4:6] + ls[2:4]
+                    coords = fix_coord_error(coords)
+                    text = ls[9].strip()
+                    if len(text) == 0:
+                        continue
+                    ret_data[file_id][coords] = text
+    return ret_data
+
+
+def collect_dict_keys(rec, vocab):
+    """
+        过滤数据, 将字典的key都找出来，作为特殊的token
+    """
+    to_add_keys = set()
+    if isinstance(rec, list):
+        for i_rec in rec:
+            to_add_keys |= collect_dict_keys(i_rec, vocab)
+    elif isinstance(rec, dict):
+        for k, v in rec.items():
+            if f"<{k}>" not in vocab:
+                to_add_keys.add(f"<s_{k}>")
+            if f"</{k}>" not in vocab:
+                to_add_keys.add(f"</s_{k}>")
+            to_add_keys |= collect_dict_keys(v, vocab)
+    else:
+        pass
+    return to_add_keys
+
+def add_special_keys(model, tokenizer, keys):
+    to_add_special_tokens = []
+    for k in sorted(keys):
+        to_add_special_tokens.append(k)
+    added_num = tokenizer.add_special_tokens({"additional_special_tokens": to_add_special_tokens})
+
+    if added_num != 0:
+        try:
+            origin_emb_len = len(model.decoder.model.decoder.embed_tokens.weight)
+            added_len = len(tokenizer.vocab) - origin_emb_len
+            model.decoder.resize_token_embeddings(len(tokenizer.vocab))
+            logging.info(
+                f"origin_emb_len is {origin_emb_len}, added_len is {added_len}, now model emb shape {model.decoder.model.decoder.embed_tokens.weight.shape}")
+        except Exception as e:
+            origin_emb_len = len(model.decoder.embed_tokens.weight)
+            added_len = len(tokenizer.vocab) - origin_emb_len
+            model.resize_token_embeddings(len(tokenizer.vocab))
+            logging.info(
+                f"origin_emb_len is {origin_emb_len}, added_len is {added_len}, now model emb shape {model.decoder.embed_tokens.weight.shape}")
+    else:
+        pass
+    return model, tokenizer, added_num
+
+"""
+对比donut的原生实现 这是个简化版 有些复杂结构不一定合适
+"""
+def json2token(obj: Any, sort_key: bool = True, sep_token="<_sep_>"):
+    """
+        编码解码
+    """
+    if isinstance(obj, list):
+        return sep_token + sep_token.join([ json2token(v, sort_key) for v in obj]) + sep_token
+    elif isinstance(obj, dict):
+        items = sorted(obj.items(), key=lambda x: x[0]) if sort_key else obj.items()
+        return "".join([fr"<s_{k}>" + json2token(v) + fr"</s_{k}>" for k, v in items])
+    return str(obj)
+
+def token2json(tokens, sep_token="<_sep_>"):
+    # dict?
+    if tokens.startswith(sep_token):
+        return [token2json(sub_tokens) for sub_tokens in tokens.split(sep_token) if sub_tokens != '']
+    elif re.match(r"<s_(.+?)>", tokens):
+        ret_dict = {}
+        while True:
+            dict_m = re.match(r"<s_(.+)>(.*?)</s_\1>", tokens)
+            if dict_m is None:
+                break
+            k, v = dict_m.groups()
+            offset = dict_m.span()[1]
+            ret_dict[k] = token2json(v)
+            tokens = tokens[offset:]
+        return ret_dict
+    else:
+        return tokens
+
+
+def custom_json2token(obj):
+    """
+        很浅的递归就可以搞定
+    """
+    if isinstance(obj, list):
+        return "".join([ "<li>"+custom_json2token(v)+"</li>" for v in obj])
+    elif isinstance(obj, dict):
+        items = sorted(obj.items(), key=lambda x: x[0])
+        return "".join([fr"<{k}>" + custom_json2token(v) + fr"</{k}>" for k, v in items])
+    return str(obj)
+
+
+def custom_token2json(tokens):
+    if tokens.startswith("<li>"):
+        return [custom_token2json(match) for match in re.findall(r"<li>(.*?)</li>", tokens)]
+    elif re.match(r"<(.+?)>", tokens):
+        ret_dict = {}
+        while True:
+            dict_m = re.match(r"<(.+)>(.*?)</\1>", tokens)
+            if dict_m is None:
+                break
+            k, v = dict_m.groups()
+            offset = dict_m.span()[1]
+            ret_dict[k] = custom_token2json(v)
+            tokens = tokens[offset:]
+        return ret_dict
+    else:
+        return tokens
+
